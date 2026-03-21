@@ -87,22 +87,20 @@ class BindCraftLauncher(ToolLauncher):
         }
 
     def launch(self, prepared: dict, run_dir: Path) -> subprocess.Popen:
-        cmd = (
-            f"conda run --no-banner -n {self._conda_env} "
-            f"python {self._install_dir / 'bindcraft.py'} "
+        commands = (
+            f"python -u {self._install_dir / 'bindcraft.py'} "
             f"--settings '{prepared['target_json']}' "
             f"--filters '{prepared['filters_json']}' "
             f"--advanced '{prepared['advanced_json']}'"
         )
-        log_path = run_dir / "bindcraft.log"
-        log_file = open(log_path, "w")
-        return subprocess.Popen(
-            cmd,
-            shell=True,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
+        script = self._write_conda_launch_script(
+            run_dir=run_dir,
+            env_name=self._conda_env,
+            commands=commands,
             cwd=str(self._install_dir),
+            log_file=str(run_dir / "bindcraft.log"),
         )
+        return subprocess.Popen(["bash", str(script)])
 
     def is_complete(self, run_dir: Path) -> bool:
         output = run_dir / "output"

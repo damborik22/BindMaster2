@@ -80,19 +80,14 @@ class BoltzGenLauncher(ToolLauncher):
         output_dir = run_dir / "output"
         output_dir.mkdir(exist_ok=True)
 
-        cmd = (
-            f"conda run --no-banner -n {self._conda_env} "
-            f"boltzgen run {prepared['spec_yaml']} "
-            f"--output {output_dir}"
+        commands = f"boltzgen run {prepared['spec_yaml']} --output {output_dir}"
+        script = self._write_conda_launch_script(
+            run_dir=run_dir,
+            env_name=self._conda_env,
+            commands=commands,
+            log_file=str(run_dir / "boltzgen.log"),
         )
-        log_path = run_dir / "boltzgen.log"
-        log_file = open(log_path, "w")
-        return subprocess.Popen(
-            cmd,
-            shell=True,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-        )
+        return subprocess.Popen(["bash", str(script)])
 
     def is_complete(self, run_dir: Path) -> bool:
         output = run_dir / "output"

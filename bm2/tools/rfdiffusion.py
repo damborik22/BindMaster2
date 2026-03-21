@@ -73,7 +73,6 @@ class RFdiffusionLauncher(ToolLauncher):
         (run_dir / "output").mkdir(exist_ok=True)
 
         cmd_parts = [
-            f"conda run --no-banner -n {self._conda_env}",
             "python scripts/run_inference.py",
             f"inference.input_pdb={prepared['target_pdb']}",
             f"inference.output_prefix={prepared['output_prefix']}",
@@ -83,15 +82,21 @@ class RFdiffusionLauncher(ToolLauncher):
         if prepared["hotspots"]:
             cmd_parts.append(f"'ppi.hotspot_res=[{prepared['hotspots']}]'")
 
-        cmd = " ".join(cmd_parts)
-        log_path = run_dir / "rfdiffusion.log"
-        log_file = open(log_path, "w")
-        return subprocess.Popen(
-            cmd,
-            shell=True,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
+        commands = " ".join(cmd_parts)
+        script = self._write_conda_launch_script(
+            run_dir=run_dir,
+            env_name=self._conda_env,
+            commands=commands,
+            cwd=str(self._install_dir),
+            log_file=str(run_dir / "rfdiffusion.log"),
+            env_vars={
+                "PYTHONPATH": (
+                    f"{self._install_dir}:"
+                    f"{Path.home() / 'BindMaster' / 'LigandMPNN'}"
+                ),
+            },
         )
+        return subprocess.Popen(["bash", str(script)])
 
     def is_complete(self, run_dir: Path) -> bool:
         output = run_dir / "output"
