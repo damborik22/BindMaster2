@@ -1,8 +1,9 @@
 """Boltz2 refolding worker — runs INSIDE the Mosaic/Boltz2 environment.
 
-This script is invoked via subprocess from the evaluator env:
-    conda run --no-banner -p /path/to/venv python -m \
-        bm2_evaluator.refolding.workers.boltz2_worker \
+This script is invoked via a generated activation script:
+    bash run_boltz2_worker.sh
+which sources the Mosaic venv, then runs:
+    python -m bm2_evaluator.refolding.workers.boltz2_worker \
         --fasta input.fasta --out_dir /path/to/output
 
 It uses the Mosaic/Boltz2 JAX API directly and produces standardized

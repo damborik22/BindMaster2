@@ -86,7 +86,8 @@ class Boltz2Engine(RefoldingEngine):
         # Build subprocess command
         cmd = self._build_cmd(
             f"--fasta {fasta_path} --out_dir {output_dir} "
-            f"--mode complex --recycling_steps {self.recycling_steps}"
+            f"--mode complex --recycling_steps {self.recycling_steps}",
+            output_dir=output_dir,
         )
 
         logger.info(f"Running Boltz2 worker: {' '.join(cmd)}")
@@ -153,7 +154,8 @@ class Boltz2Engine(RefoldingEngine):
 
         cmd = self._build_cmd(
             f"--fasta {fasta_path} --out_dir {output_dir} "
-            f"--mode monomer --recycling_steps {self.recycling_steps}"
+            f"--mode monomer --recycling_steps {self.recycling_steps}",
+            output_dir=output_dir,
         )
 
         logger.info(f"Running Boltz2 monomer worker")
@@ -192,34 +194,55 @@ class Boltz2Engine(RefoldingEngine):
         if self.venv_path:
             python = Path(self.venv_path) / "bin" / "python"
             return python.exists()
-        # For named conda env, try running a test
-        try:
-            cmd = self._build_cmd("--help")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        # Conda fallback: check env exists on filesystem
+        if self.conda_env:
+            for prefix in ["miniconda3", "miniforge3", "mambaforge", "anaconda3"]:
+                env_path = Path.home() / prefix / "envs" / self.conda_env
+                if env_path.is_dir():
+                    return True
+        return False
 
-    def _build_cmd(self, worker_args: str) -> list[str]:
+    def _build_cmd(self, worker_args: str, output_dir: Path) -> list[str]:
         """Build the subprocess command to invoke the worker."""
+        worker_cmd = f"python -m {_WORKER_MODULE} {worker_args}"
+
         if self.venv_path:
-            python = str(Path(self.venv_path) / "bin" / "python")
-            parts = [python, "-m", _WORKER_MODULE]
+            script_path = output_dir / "run_boltz2_worker.sh"
+            content = f"""\
+#!/usr/bin/env bash
+set -euo pipefail
+source "{self.venv_path}/bin/activate"
+{worker_cmd}
+"""
+            script_path.write_text(content)
+            script_path.chmod(0o755)
+            return ["bash", str(script_path)]
         elif self.conda_env:
-            parts = [
-                "conda",
-                "run",
-                "--no-banner",
-                "-n",
-                self.conda_env,
-                "python",
-                "-m",
-                _WORKER_MODULE,
-            ]
+            script_path = output_dir / "run_boltz2_worker.sh"
+            content = f"""\
+#!/usr/bin/env bash
+set -euo pipefail
+set +u
+_conda_found=false
+for _conda_sh in \\
+    "${{HOME}}/miniconda3/etc/profile.d/conda.sh" \\
+    "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
+    "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
+    "${{HOME}}/BindMaster/conda/etc/profile.d/conda.sh" \\
+    "${{HOME}}/anaconda3/etc/profile.d/conda.sh" \\
+    "/opt/conda/etc/profile.d/conda.sh" \\
+    "/opt/miniforge3/etc/profile.d/conda.sh"; do
+    [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
+done
+[[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found" >&2; exit 1; }}
+conda activate {self.conda_env}
+set -u
+{worker_cmd}
+"""
+            script_path.write_text(content)
+            script_path.chmod(0o755)
+            return ["bash", str(script_path)]
         else:
             parts = [sys.executable, "-m", _WORKER_MODULE]
-
-        parts.extend(worker_args.split())
-        return parts
+            parts.extend(worker_args.split())
+            return parts

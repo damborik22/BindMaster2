@@ -1,8 +1,9 @@
 """AF2-Multimer refolding worker — runs INSIDE the binder-eval-af2 environment.
 
-This script is invoked via subprocess from the evaluator env:
-    conda run --no-banner -n binder-eval-af2 python -m \
-        bm2_evaluator.refolding.workers.af2_worker \
+This script is invoked via a generated activation script:
+    bash run_af2_worker.sh
+which activates the binder-eval-af2 conda env, then runs:
+    python -m bm2_evaluator.refolding.workers.af2_worker \
         --target_pdb target.pdb --target_chain A \
         --binder_seq MKWAS... --out_dir /path/to/output
 

@@ -107,7 +107,8 @@ class AF2Engine(RefoldingEngine):
             f"--binder_seq {binder_seq} "
             f"--out_dir {output_dir} "
             f"--mode complex "
-            f"--num_recycles {self.num_recycles}"
+            f"--num_recycles {self.num_recycles}",
+            output_dir=output_dir,
         )
 
         logger.info(f"Running AF2 worker: {' '.join(cmd[:6])}...")
@@ -173,7 +174,8 @@ class AF2Engine(RefoldingEngine):
 
         cmd = self._build_cmd(
             f"--fasta {fasta_path} --out_dir {output_dir} "
-            f"--mode monomer --num_recycles {self.num_recycles}"
+            f"--mode monomer --num_recycles {self.num_recycles}",
+            output_dir=output_dir,
         )
 
         logger.info("Running AF2 monomer worker")
@@ -208,38 +210,40 @@ class AF2Engine(RefoldingEngine):
         )
 
     def check_available(self) -> bool:
-        """Check if the AF2 conda env exists."""
-        try:
-            result = subprocess.run(
-                [
-                    "conda",
-                    "run",
-                    "--no-banner",
-                    "-n",
-                    self.conda_env,
-                    "python",
-                    "-c",
-                    "import colabdesign; print('ok')",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        """Check if the AF2 conda env exists via filesystem."""
+        for prefix in ["miniconda3", "miniforge3", "mambaforge", "anaconda3"]:
+            env_path = Path.home() / prefix / "envs" / self.conda_env
+            if env_path.is_dir():
+                return True
+        if (Path("/opt/conda/envs") / self.conda_env).is_dir():
+            return True
+        return False
 
-    def _build_cmd(self, worker_args: str) -> list[str]:
-        """Build subprocess command for the worker."""
-        parts = [
-            "conda",
-            "run",
-            "--no-banner",
-            "-n",
-            self.conda_env,
-            "python",
-            "-m",
-            _WORKER_MODULE,
-        ]
-        parts.extend(worker_args.split())
-        return parts
+    def _build_cmd(self, worker_args: str, output_dir: Path) -> list[str]:
+        """Build subprocess command for the worker via generated script."""
+        script_path = output_dir / "run_af2_worker.sh"
+        worker_cmd = f"python -m {_WORKER_MODULE} {worker_args}"
+
+        content = f"""\
+#!/usr/bin/env bash
+set -euo pipefail
+set +u
+_conda_found=false
+for _conda_sh in \\
+    "${{HOME}}/miniconda3/etc/profile.d/conda.sh" \\
+    "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
+    "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
+    "${{HOME}}/BindMaster/conda/etc/profile.d/conda.sh" \\
+    "${{HOME}}/anaconda3/etc/profile.d/conda.sh" \\
+    "/opt/conda/etc/profile.d/conda.sh" \\
+    "/opt/miniforge3/etc/profile.d/conda.sh"; do
+    [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
+done
+[[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found" >&2; exit 1; }}
+conda activate {self.conda_env}
+set -u
+{worker_cmd}
+"""
+        script_path.write_text(content)
+        script_path.chmod(0o755)
+        return ["bash", str(script_path)]
