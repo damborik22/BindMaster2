@@ -1,20 +1,14 @@
 """Proteina-Complexa (NVIDIA) output ingestor.
 
-Expected structure:
-    output_dir/
-    +-- *.pdb or *.cif      Design structures (co-generated sequences)
-    +-- eval/
-        +-- eval.csv         Evaluation CSV from Complexa's pipeline
+Handles two output formats:
+1. Real Complexa pipeline output:
+   - Structures in inference/{run_name}/ (PDB files)
+   - Metrics in evaluation_results/binder_results_*.csv
+   - Columns: _pAE_complex, _pLDDT_complex, _scRMSD_binder_*
 
-Eval CSV columns:
-    - ipae: interaction PAE
-    - iptm: interaction pTM (0-1)
-    - plddt: predicted LDDT
-    - n_hbonds: number of hydrogen bonds
-    - rmsd: backbone RMSD
-
-Search strategies: best_of_n, beam_search, mcts, fk_steering,
-                  generate_and_hallucinate
+2. Manual/generic input (fallback):
+   - Structures as PDB/CIF in output_dir/
+   - Metrics in eval/eval.csv with columns: ipae, iptm, plddt, n_hbonds, rmsd
 """
 
 from __future__ import annotations
@@ -47,15 +41,23 @@ class ComplexaIngestor(DesignIngestor):
         # Find metrics CSV
         metrics_by_id = self._load_metrics(output_dir)
 
-        # Find structure files (PDB and CIF)
+        # Find structure files — search output_dir and subdirectories
         structure_files = sorted(
             list(output_dir.glob("*.pdb"))
             + list(output_dir.glob("*.cif"))
         )
+        # Also search one level of subdirectories (Complexa inference output)
+        if not structure_files:
+            for subdir in sorted(output_dir.iterdir()):
+                if subdir.is_dir():
+                    structure_files.extend(sorted(
+                        list(subdir.glob("*.pdb"))
+                        + list(subdir.glob("*.cif"))
+                    ))
 
         if not structure_files:
             raise FileNotFoundError(
-                f"No PDB/CIF files found in {output_dir}"
+                f"No PDB/CIF files found in {output_dir} or subdirectories"
             )
 
         designs = []
@@ -104,9 +106,29 @@ class ComplexaIngestor(DesignIngestor):
         return designs
 
     def _load_metrics(self, output_dir: Path) -> dict[str, dict[str, float]]:
-        """Load metrics from Complexa evaluation CSV."""
+        """Load metrics from Complexa evaluation CSV.
+
+        Searches for:
+        1. Real Complexa output: evaluation_results/binder_results_*.csv
+        2. Fallback static paths: eval/eval.csv, eval.csv, metrics.csv
+        """
         metrics: dict[str, dict[str, float]] = {}
 
+        # Search 1: Glob for real Complexa binder_results CSVs
+        eval_dirs = [
+            output_dir / "evaluation_results",
+            output_dir.parent / "evaluation_results",  # one level up
+        ]
+        for eval_dir in eval_dirs:
+            if not eval_dir.is_dir():
+                continue
+            candidates = sorted(eval_dir.glob("binder_results_*.csv"))
+            if candidates:
+                metrics = self._parse_complexa_csv(candidates[0])
+                if metrics:
+                    return metrics
+
+        # Search 2: Fallback static paths (manual/generic input)
         csv_candidates = [
             output_dir / "eval" / "eval.csv",
             output_dir / "eval.csv",
@@ -135,9 +157,52 @@ class ComplexaIngestor(DesignIngestor):
                         except (ValueError, TypeError):
                             pass
                     metrics[design_id] = entry
-                break  # Use first valid CSV
+                break
 
             except Exception as e:
                 logger.warning(f"Failed to read {csv_path}: {e}")
+
+        return metrics
+
+    def _parse_complexa_csv(
+        self, csv_path: Path
+    ) -> dict[str, dict[str, float]]:
+        """Parse a real Complexa binder_results CSV with native column names."""
+        metrics: dict[str, dict[str, float]] = {}
+
+        # Column mapping: Complexa native → standardized tool_metrics keys
+        col_map = {
+            "_pAE_complex": "complexa_ipae",
+            "_pLDDT_complex": "complexa_plddt",
+        }
+
+        try:
+            rows = self._read_csv(csv_path)
+            for row in rows:
+                design_id = (
+                    row.get("design_id")
+                    or row.get("name")
+                    or row.get("sample_name")
+                    or row.get("id")
+                    or ""
+                )
+                if not design_id:
+                    continue
+                entry: dict[str, float] = {}
+                for k, v in row.items():
+                    try:
+                        val = float(v)
+                    except (ValueError, TypeError):
+                        continue
+                    # Map known columns to standard names
+                    mapped = col_map.get(k, k)
+                    entry[mapped] = val
+                    # Also capture scRMSD columns
+                    if "scRMSD" in k:
+                        entry[f"complexa_{k.lstrip('_')}"] = val
+                metrics[design_id] = entry
+
+        except Exception as e:
+            logger.warning(f"Failed to parse Complexa CSV {csv_path}: {e}")
 
         return metrics
