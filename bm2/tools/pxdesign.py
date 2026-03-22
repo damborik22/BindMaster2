@@ -102,11 +102,12 @@ class PXDesignLauncher(ToolLauncher):
         (run_dir / "output").mkdir(exist_ok=True)
 
         commands = (
-            f"python -m pxdesign.runner.cli pipeline "
+            f"pxdesign pipeline "
             f"-i {prepared['config_yaml']} "
             f"-o {prepared['output_dir']} "
             f"--N_sample {prepared['num_samples']} "
             f"--preset {prepared['preset']} "
+            f"--dtype bf16 "
             f"--N_max_runs 1"
         )
         script = self._write_conda_launch_script(

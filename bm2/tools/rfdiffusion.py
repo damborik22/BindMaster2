@@ -57,30 +57,35 @@ class RFdiffusionLauncher(ToolLauncher):
         )
         lo, hi = run_config.binder_length_range
 
-        # RFdiffusion contig string
-        contig = f"A{lo}-{hi}/0 B1-{target.target_length if target else 100}"
-        hotspot_str = ",".join(hotspots) if hotspots else ""
+        # RFAA contig string: just the binder length range
+        contig = f"{lo}-{hi}"
+        hotspot_str = ",".join(str(h) for h in hotspots) if hotspots else ""
 
         return {
             "target_pdb": str(target.pdb_path) if target else "",
             "contig": contig,
             "hotspots": hotspot_str,
             "num_designs": run_config.num_designs,
-            "output_prefix": str(run_dir / "output" / "design"),
+            "output_prefix": str(run_dir / "output" / "sample"),
+            "ckpt_path": str(self._install_dir / "weights" / "RFDiffusionAA_paper_weights.pt"),
+            "diffusion_steps": run_config.extra_settings.get("diffusion_steps", 100),
         }
 
     def launch(self, prepared: dict, run_dir: Path) -> subprocess.Popen:
         (run_dir / "output").mkdir(exist_ok=True)
 
         cmd_parts = [
-            "python scripts/run_inference.py",
-            f"inference.input_pdb={prepared['target_pdb']}",
-            f"inference.output_prefix={prepared['output_prefix']}",
+            "python run_inference.py",
+            f'inference.input_pdb="{prepared["target_pdb"]}"',
+            f'inference.output_prefix="{prepared["output_prefix"]}"',
+            f'inference.ckpt_path="{prepared["ckpt_path"]}"',
             f"inference.num_designs={prepared['num_designs']}",
-            f"'contigmap.contigs=[{prepared['contig']}]'",
+            f"diffuser.T={prepared['diffusion_steps']}",
+            f"contigmap.contigs=\"['{prepared['contig']}']\"",
         ]
         if prepared["hotspots"]:
-            cmd_parts.append(f"'ppi.hotspot_res=[{prepared['hotspots']}]'")
+            hotspot_val = prepared["hotspots"]
+            cmd_parts.append(f"'ppi.hotspot_res=[{hotspot_val}]'")
 
         commands = " ".join(cmd_parts)
         script = self._write_conda_launch_script(
