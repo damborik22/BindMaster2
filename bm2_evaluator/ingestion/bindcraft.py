@@ -38,6 +38,16 @@ from bm2_evaluator.ingestion.base import DesignIngestor
 
 logger = logging.getLogger(__name__)
 
+# BindCraft uses mixed-case column names across versions.
+# Map all known variants to a single canonical lowercase form.
+_BINDCRAFT_COL_MAP: dict[str, str] = {
+    "i_pTM": "i_ptm",
+    "Average_i_pTM": "i_ptm",
+    "i_pAE": "i_pae",
+    "Average_i_pAE": "i_pae",
+    "Sequence": "sequence",
+}
+
 
 class BindCraftIngestor(DesignIngestor):
     """Parse BindCraft output directory."""
@@ -77,8 +87,10 @@ class BindCraftIngestor(DesignIngestor):
                 for k, v in row.items():
                     if k in ("Design", "design_name", "name"):
                         continue
+                    # Normalise mixed-case BindCraft column names
+                    norm_k = _BINDCRAFT_COL_MAP.get(k, k)
                     try:
-                        metrics[k] = float(v)
+                        metrics[norm_k] = float(v)
                     except (ValueError, TypeError):
                         pass
                 scores_by_name[name] = metrics

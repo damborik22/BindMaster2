@@ -2,17 +2,22 @@
 
 Expected structure:
     output_dir/
-    +-- *.pdb                PDB files for passing designs
-    +-- metrics.csv          Metrics CSV (or results.csv, etc.)
+    +-- *.pdb                        PDB files for passing designs
+    +-- sample_level_output.csv      Primary metrics CSV (real pipeline output)
+    +-- metrics.csv                  Alternative metrics CSV
 
-Metrics CSV columns:
-    - ptx_iptm: 0-1 scale (Protenix ipTM)
-    - ptx_plddt: 0-1 scale (Protenix pLDDT)
-    - af2ig_plddt: 0-100 scale (AF2 in-silico validation pLDDT)
-    - af2ig_rmsd: RMSD from AF2 validation (Angstroms)
+Metrics CSV columns (real PXDesign pipeline output):
+    - i_pTM: 0-1 scale (Protenix ipTM)
+    - pLDDT: 0-1 scale (Protenix pLDDT)
+    - af2_iptm: AF2 in-silico validation ipTM
+    - af2_plddt: 0-100 scale (AF2 in-silico validation pLDDT)
+
+Legacy column names (also supported):
+    - ptx_iptm, ptx_plddt, af2ig_plddt, af2ig_rmsd
 
 Note: PXDesign has TWO pLDDT values on DIFFERENT scales.
 Both stored in tool_metrics with original names.
+Values may be bracket-wrapped like [0.85] — stripped before conversion.
 
 Filter methodology (from paper bioRxiv 2025.08.15.670450):
     1. Protenix filter: ptx_iptm >= 0.85 (strict) or >= 0.80 (basic)
@@ -23,6 +28,7 @@ Filter methodology (from paper bioRxiv 2025.08.15.670450):
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 from bm2_evaluator.core.models import IngestedDesign, SourceTool
@@ -31,12 +37,45 @@ from bm2_evaluator.ingestion.base import DesignIngestor
 logger = logging.getLogger(__name__)
 
 
+# Column mapping: real PXDesign pipeline names → standardised tool_metrics keys
+_PXDESIGN_COL_MAP = {
+    # Real pipeline column names (from sample_level_output.csv)
+    "i_pTM": "pxdesign_iptm",
+    "af2_iptm": "pxdesign_af2_iptm",
+    "pLDDT": "pxdesign_plddt",
+    "af2_plddt": "pxdesign_af2_plddt",
+    # Legacy / fallback column names
+    "ptx_iptm": "pxdesign_iptm",
+    "ptx_plddt": "pxdesign_plddt",
+    "af2ig_plddt": "pxdesign_af2_plddt",
+    "af2ig_rmsd": "pxdesign_af2_rmsd",
+}
+
+# Column names that identify a CSV as PXDesign output
+_PXDESIGN_MARKER_COLS = {
+    "ptx_iptm", "ptx_plddt", "af2ig_plddt",
+    "i_pTM", "pLDDT", "af2_iptm", "af2_plddt",
+}
+
+
 class PXDesignIngestor(DesignIngestor):
     """Parse PXDesign output directory."""
 
     @property
     def tool_name(self) -> str:
         return "pxdesign"
+
+    @staticmethod
+    def _safe_float(v) -> float | None:
+        """Convert to float, stripping bracket-wrapped values like [0.85]."""
+        if v is None:
+            return None
+        try:
+            s = str(v).strip().strip("[]")
+            f = float(s)
+            return None if (math.isnan(f) or math.isinf(f)) else f
+        except (ValueError, TypeError):
+            return None
 
     def ingest(
         self,
@@ -101,18 +140,46 @@ class PXDesignIngestor(DesignIngestor):
         return designs
 
     def _load_metrics(self, output_dir: Path) -> dict[str, dict[str, float]]:
-        """Load metrics from available CSV files."""
+        """Load metrics from available CSV files.
+
+        Search order:
+        1. sample_level_output.csv (real PXDesign pipeline output)
+        2. metrics.csv / results.csv / scores.csv (legacy names)
+        3. Recursive glob for sample_level_output.csv in subdirectories
+        4. Any CSV with recognised PXDesign column names
+        """
         metrics: dict[str, dict[str, float]] = {}
 
-        csv_candidates = [
+        csv_candidates: list[Path] = [
+            output_dir / "sample_level_output.csv",
             output_dir / "metrics.csv",
             output_dir / "results.csv",
             output_dir / "scores.csv",
         ]
-        # Also check for any CSV with ptx_ columns
+        # Recursive search for sample_level_output.csv in subdirectories
+        csv_candidates.extend(
+            sorted(output_dir.rglob("sample_level_output.csv"))
+        )
+        # Also check for any other CSV files in the output directory
         csv_candidates.extend(sorted(output_dir.glob("*.csv")))
 
-        for csv_path in csv_candidates:
+        # De-duplicate while preserving order
+        seen: set[Path] = set()
+        unique_candidates: list[Path] = []
+        for p in csv_candidates:
+            resolved = p.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_candidates.append(p)
+
+        known_csv_names = {
+            "sample_level_output.csv",
+            "metrics.csv",
+            "results.csv",
+            "scores.csv",
+        }
+
+        for csv_path in unique_candidates:
             if not csv_path.is_file():
                 continue
             try:
@@ -122,13 +189,10 @@ class PXDesignIngestor(DesignIngestor):
 
                 # Check if this looks like a PXDesign CSV
                 headers = set(rows[0].keys())
-                has_pxdesign_cols = bool(
-                    headers & {"ptx_iptm", "ptx_plddt", "af2ig_plddt"}
-                )
-                if not has_pxdesign_cols and csv_path.name not in (
-                    "metrics.csv",
-                    "results.csv",
-                    "scores.csv",
+                has_pxdesign_cols = bool(headers & _PXDESIGN_MARKER_COLS)
+                if (
+                    not has_pxdesign_cols
+                    and csv_path.name not in known_csv_names
                 ):
                     continue
 
@@ -143,10 +207,11 @@ class PXDesignIngestor(DesignIngestor):
                         continue
                     entry: dict[str, float] = {}
                     for k, v in row.items():
-                        try:
-                            entry[k] = float(v)
-                        except (ValueError, TypeError):
-                            pass
+                        val = self._safe_float(v)
+                        if val is not None:
+                            # Map known columns to standardised names
+                            mapped = _PXDESIGN_COL_MAP.get(k, k)
+                            entry[mapped] = val
                     metrics[design_id] = entry
                 break  # Use first valid CSV found
 

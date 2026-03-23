@@ -4,7 +4,9 @@ Handles two output formats:
 1. Real Complexa pipeline output:
    - Structures in inference/{run_name}/ (PDB files)
    - Metrics in evaluation_results/binder_results_*.csv
-   - Columns: _pAE_complex, _pLDDT_complex, _scRMSD_binder_*
+   - Columns: self_complex_i_pTM, self_complex_pLDDT, self_complex_i_pAE,
+              self_binder_scRMSD
+   - Legacy columns also supported: _pAE_complex, _pLDDT_complex
 
 2. Manual/generic input (fallback):
    - Structures as PDB/CIF in output_dir/
@@ -171,7 +173,13 @@ class ComplexaIngestor(DesignIngestor):
         metrics: dict[str, dict[str, float]] = {}
 
         # Column mapping: Complexa native → standardized tool_metrics keys
+        # Real Complexa evaluation CSV uses self_complex_* and self_binder_* prefixes
         col_map = {
+            "self_complex_i_pTM": "complexa_iptm",
+            "self_complex_pLDDT": "complexa_plddt",
+            "self_complex_i_pAE": "complexa_ipae",
+            "self_binder_scRMSD": "complexa_scrmsd",
+            # Legacy / fallback column names
             "_pAE_complex": "complexa_ipae",
             "_pLDDT_complex": "complexa_plddt",
         }
