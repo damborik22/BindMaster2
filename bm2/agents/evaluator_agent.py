@@ -96,3 +96,14 @@ class EvaluatorAgent(Agent):
         report_path = eval_dir / "report.txt"
         if report_path.exists():
             logger.info("\n" + report_path.read_text())
+
+        # Generate BM1-style HTML report if evaluation succeeded
+        try:
+            from bm2_evaluator.reporting.bm1_report import generate_bm1_report
+            report_dir = eval_dir / "report"
+            generate_bm1_report(
+                evaluation_dir=eval_dir,
+                output_dir=report_dir,
+            )
+        except Exception as e:
+            logger.warning(f"BM1 report generation failed (non-fatal): {e}")
