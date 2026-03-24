@@ -75,6 +75,14 @@ def generate_report(
         lines.append(f"{label:<22}{count:>4}{suffix}")
     lines.append("")
 
+    # Tier & metric legend
+    lines.append("Legend:")
+    lines.append(
+        "  agreement_count: number of engines with ipSAE_min > 0.61 "
+        "(0 = none, 1 = Boltz-2 only, 2 = both Boltz-2 and AF2)"
+    )
+    lines.append("")
+
     # Source tool breakdown
     lines.append("Source Tool Breakdown:")
     for tool, total in sorted(tool_counts.items()):

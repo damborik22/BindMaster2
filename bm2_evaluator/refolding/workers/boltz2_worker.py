@@ -71,11 +71,17 @@ def run_prediction(
     out_dir: Path,
     recycling_steps: int = 3,
     num_samples: int = 1,
+    target_pdb: str | None = None,
 ) -> dict:
     """Run Boltz2 prediction using Mosaic API.
 
     Chain ordering: binder FIRST, target SECOND (Mosaic convention).
     This is recorded in the output so the evaluator can slice correctly.
+
+    Args:
+        target_pdb: Optional path to target PDB. When provided, the target
+            backbone is constrained via ``force_template=True`` so that
+            Boltz-2 does not misfold the target from sequence alone.
     """
     # These imports only work inside the Mosaic/Boltz2 environment
     from mosaic.models.boltz2 import Boltz2
@@ -88,9 +94,23 @@ def run_prediction(
 
     folder = Boltz2()
 
+    # Load template chain from PDB if provided (prevents target misfolding)
+    template_chain = None
+    if target_pdb:
+        import gemmi
+
+        logger.info(f"Loading target template from {target_pdb}")
+        st = gemmi.read_structure(target_pdb)
+        template_chain = st[0][0]
+
     # Construct features: binder first, target second (Mosaic convention)
     binder_chain = TargetChain(sequence=binder_seq, use_msa=False)
-    target_chain = TargetChain(sequence=target_seq, use_msa=True)
+    target_chain = TargetChain(
+        sequence=target_seq,
+        use_msa=True,
+        template_chain=template_chain,
+        force_template=template_chain is not None,
+    )
 
     features, structure = folder.binder_features(
         binder_length=len(binder_seq),
@@ -278,6 +298,19 @@ def main():
     parser.add_argument(
         "--recycling_steps", type=int, default=3, help="Recycling steps"
     )
+    parser.add_argument(
+        "--target-pdb",
+        default=None,
+        help="Path to target PDB for template-constrained refolding. "
+        "Constrains target backbone via force_template to prevent "
+        "target misfolding (e.g. CALCA 28 A RMSD issue).",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=6,
+        help="Number of prediction samples (default 6)",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -302,6 +335,8 @@ def main():
                 target_seq=target_seq,
                 out_dir=out_dir,
                 recycling_steps=args.recycling_steps,
+                num_samples=args.num_samples,
+                target_pdb=args.target_pdb,
             )
         else:
             # Monomer mode: single sequence

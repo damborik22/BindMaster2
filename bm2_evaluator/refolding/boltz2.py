@@ -44,16 +44,23 @@ class Boltz2Engine(RefoldingEngine):
         conda_env: Optional[str] = None,
         timeout: int = 3600,
         recycling_steps: int = 3,
+        target_pdb: Optional[str] = None,
+        num_samples: int = 6,
     ):
         """Initialize Boltz2 engine.
 
         Args:
-            venv_path: Path to Mosaic venv (uses -p flag with conda run).
+            venv_path: Path to Mosaic venv (activation via generated script).
                        Default: ~/BindMaster/Mosaic/.venv
             conda_env: Named conda env (uses -n flag). Mutually exclusive
                        with venv_path.
             timeout: Subprocess timeout in seconds (default 1 hour).
             recycling_steps: Number of recycling iterations.
+            target_pdb: Optional path to target PDB for template-constrained
+                        refolding. When provided, the target backbone is
+                        constrained via force_template=True to prevent
+                        target misfolding (e.g. CALCA 28 A RMSD issue).
+            num_samples: Number of prediction samples (default 6).
         """
         if venv_path is None and conda_env is None:
             venv_path = str(
@@ -63,6 +70,8 @@ class Boltz2Engine(RefoldingEngine):
         self.conda_env = conda_env
         self.timeout = timeout
         self.recycling_steps = recycling_steps
+        self.target_pdb = target_pdb
+        self.num_samples = num_samples
 
     @property
     def name(self) -> str:
@@ -84,9 +93,16 @@ class Boltz2Engine(RefoldingEngine):
         )
 
         # Build subprocess command
-        cmd = self._build_cmd(
+        worker_args = (
             f"--fasta {fasta_path} --out_dir {output_dir} "
-            f"--mode complex --recycling_steps {self.recycling_steps}",
+            f"--mode complex --recycling_steps {self.recycling_steps} "
+            f"--num-samples {self.num_samples}"
+        )
+        if self.target_pdb is not None:
+            worker_args += f" --target-pdb {self.target_pdb}"
+
+        cmd = self._build_cmd(
+            worker_args,
             output_dir=output_dir,
         )
 
