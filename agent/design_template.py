@@ -462,8 +462,8 @@ def design(
 
         boltz_features, _ = folder.target_only_features(
             chains=[
-                TargetChain(sequence=seq_str, use_msa=True),
-                TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
+                TargetChain(sequence=seq_str, use_msa=USE_MSA),
+                TargetChain(sequence=target_sequence, use_msa=USE_MSA, template_chain=template_chain),
             ]
         )
         ranking_loss = folder.build_multisample_loss(
@@ -580,8 +580,8 @@ def design(
 
             boltz_features, boltz_writer = folder.target_only_features(
                 chains=[
-                    TargetChain(sequence=seq_str, use_msa=True),
-                    TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
+                    TargetChain(sequence=seq_str, use_msa=USE_MSA),
+                    TargetChain(sequence=target_sequence, use_msa=USE_MSA, template_chain=template_chain),
                 ]
             )
 
