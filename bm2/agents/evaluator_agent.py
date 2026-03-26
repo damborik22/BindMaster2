@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import logging
 import subprocess
 from pathlib import Path
@@ -97,13 +98,82 @@ class EvaluatorAgent(Agent):
         if report_path.exists():
             logger.info("\n" + report_path.read_text())
 
-        # Generate BM1-style HTML report if evaluation succeeded
+        # Generate HTML reports: BM1 full report (optional) + standalone fallback
+        self._generate_reports(eval_dir, campaign)
+
+    def _generate_reports(self, eval_dir: Path, campaign: Campaign) -> None:
+        """Generate HTML reports: try BM1 first, always produce standalone."""
+        # Try BM1 report (rich plots + PyMOL scripts)
         try:
             from bm2_evaluator.reporting.bm1_report import generate_bm1_report
             report_dir = eval_dir / "report"
-            generate_bm1_report(
-                evaluation_dir=eval_dir,
-                output_dir=report_dir,
-            )
+            if generate_bm1_report(evaluation_dir=eval_dir, output_dir=report_dir):
+                logger.info("BM1 HTML report generated")
+            else:
+                raise RuntimeError("BM1 report returned False")
         except Exception as e:
-            logger.warning(f"BM1 report generation failed (non-fatal): {e}")
+            logger.info(f"BM1 report unavailable ({e}), skipping")
+
+        # Standalone HTML report (always attempted as guaranteed fallback)
+        try:
+            from bm2_evaluator.reporting.html_report import generate_html_report
+
+            scored_designs = self._load_summary_csv(eval_dir)
+            if not scored_designs:
+                logger.warning("No designs in summary CSV, skipping HTML report")
+                return
+
+            target_info = {
+                "name": campaign.target.pdb_path.stem if campaign.target else "unknown",
+                "chain": campaign.target.chains[0] if campaign.target and campaign.target.chains else "?",
+                "n_residues": getattr(campaign.target, "target_length", "?"),
+            }
+            eval_config = {
+                "engines": campaign.eval_engines,
+                "ipsae_consensus_threshold": campaign.eval_config.get(
+                    "ipsae_threshold", 0.61
+                ),
+                "pae_cutoff": campaign.eval_config.get("pae_cutoff", 15.0),
+                "use_rosetta": campaign.eval_rosetta,
+            }
+
+            html_path = eval_dir / "report.html"
+            generate_html_report(
+                scored_designs=scored_designs,
+                target_info=target_info,
+                eval_config=eval_config,
+                output_path=html_path,
+            )
+            logger.info(f"Standalone HTML report: {html_path}")
+        except Exception as e2:
+            logger.warning(f"Standalone HTML report failed: {e2}")
+
+    @staticmethod
+    def _load_summary_csv(eval_dir: Path) -> list[dict]:
+        """Load evaluation_summary.csv into a list of dicts."""
+        summary_csv = eval_dir / "evaluation_summary.csv"
+        if not summary_csv.exists():
+            return []
+
+        designs: list[dict] = []
+        with open(summary_csv, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Convert numeric fields
+                d: dict = {}
+                for key, val in row.items():
+                    if val == "":
+                        d[key] = None
+                    else:
+                        try:
+                            d[key] = float(val)
+                        except (ValueError, TypeError):
+                            d[key] = val
+                # Ensure rank is int if present
+                if d.get("rank") is not None:
+                    try:
+                        d["rank"] = int(float(d["rank"]))
+                    except (ValueError, TypeError):
+                        pass
+                designs.append(d)
+        return designs
