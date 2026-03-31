@@ -56,6 +56,28 @@ GRID_SEARCH_EXPERIMENTS = [
      {"MPNN_TEMPERATURE": 0.01}),
 ]
 
+PROTEINA_GRID_SEARCH = [
+    ("Baseline: ipTM + ipSAE beam scoring", {}),
+    ("Wider beam: BEAM_WIDTH 4 → 8 — more candidates explored",
+     {"BEAM_WIDTH": 8}),
+    ("More branching: N_BRANCH 4 → 8 — wider tree search",
+     {"N_BRANCH": 8}),
+    ("Larger binder: 120 aa",
+     {"MIN_LENGTH": 120, "MAX_LENGTH": 120}),
+    ("Much larger binder: 200 aa",
+     {"MIN_LENGTH": 200, "MAX_LENGTH": 200}),
+    ("Add contact loss to beam scoring",
+     {"WEIGHT_BINDER_TARGET_CONTACT": 1.0}),
+    ("Add pLDDT to beam scoring",
+     {"WEIGHT_PLDDT": 0.3}),
+    ("Add binder PAE to beam scoring",
+     {"WEIGHT_WITHIN_BINDER_PAE": 0.4}),
+    ("More inverse folding: 10 per backbone",
+     {"INVERSE_FOLD_SAMPLES": 10}),
+    ("Fewer checkpoints (faster): [0, 200, 400]",
+     {"STEP_CHECKPOINTS": [0, 200, 400]}),
+]
+
 
 # ============================
 # DESIGN.PY EDITING
@@ -246,11 +268,13 @@ def decide_simple(
     experiment_id: int,
     defaults: dict,
     experiments: list[dict],
+    engine: str = "boltz2",
 ) -> tuple[str, dict] | None:
     """Simple grid search -- return next experiment from predefined list."""
-    if experiment_id >= len(GRID_SEARCH_EXPERIMENTS):
+    grid = PROTEINA_GRID_SEARCH if engine == "proteina" else GRID_SEARCH_EXPERIMENTS
+    if experiment_id >= len(grid):
         return None
-    hypothesis, changes = GRID_SEARCH_EXPERIMENTS[experiment_id]
+    hypothesis, changes = grid[experiment_id]
     return hypothesis, changes
 
 
@@ -258,6 +282,7 @@ def decide_manual(
     experiment_id: int,
     defaults: dict,
     experiments: list[dict],
+    engine: str = "boltz2",
 ) -> tuple[str, dict] | None:
     """Manual mode -- print state, ask human."""
     print("\n" + "=" * 60)
@@ -295,6 +320,7 @@ def decide_auto(
     experiment_id: int,
     defaults: dict,
     experiments: list[dict],
+    engine: str = "boltz2",
 ) -> tuple[str, dict] | None:
     """Auto mode -- LLM decides. Stub for now."""
     print("  AUTO mode not yet implemented. Use 'simple' or 'manual'.")
@@ -320,6 +346,7 @@ def run_tuning_loop(
     max_experiments: int = 10,
     log_path: Path | None = None,
     timeout: int = 3600,
+    engine: str = "boltz2",
 ) -> dict:
     """Run the Karpathy loss-tuning loop.
 
@@ -360,7 +387,7 @@ def run_tuning_loop(
         print(f"{'='*60}")
 
         # 1. Decide what to change
-        decision = decide_fn(i, defaults, experiments)
+        decision = decide_fn(i, defaults, experiments, engine=engine)
         if decision is None:
             print("No more experiments to run. Stopping.")
             break
@@ -544,6 +571,10 @@ def main():
         "--timeout", type=int, default=3600,
         help="Timeout per Mosaic run in seconds",
     )
+    parser.add_argument(
+        "--engine", choices=["boltz2", "proteina"], default="boltz2",
+        help="Design engine (default: boltz2)",
+    )
     args = parser.parse_args()
 
     result = run_tuning_loop(
@@ -553,6 +584,7 @@ def main():
         mode=args.mode,
         max_experiments=args.max_experiments,
         timeout=args.timeout,
+        engine=args.engine,
     )
 
     return result
