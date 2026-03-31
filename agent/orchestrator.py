@@ -95,6 +95,7 @@ def phase2_tune(
     max_experiments: int = 10,
     mosaic_venv: str = "",
     n_designs_per_experiment: int = 10,
+    engine: str = "boltz2",
 ) -> Path:
     """Phase 2: Loss Function Tuning (Karpathy Loop).
 
@@ -107,7 +108,10 @@ def phase2_tune(
     print("PHASE 2: Loss Function Tuning")
     print("=" * 60)
 
-    template = Path(__file__).parent / "design_template.py"
+    if engine == "proteina":
+        template = Path(__file__).parent / "design_template_proteina.py"
+    else:
+        template = Path(__file__).parent / "design_template.py"
     design_py = output_dir / "design.py"
 
     # Copy template and inject target sequence
@@ -178,6 +182,7 @@ def phase2_tune(
         "--mosaic-venv", mosaic_venv,
         "--mode", mode,
         "--max-experiments", str(max_experiments),
+        "--engine", engine,
     ]
 
     print(f"  Tuning mode: {mode}")
@@ -197,6 +202,7 @@ def phase3_production(
     mosaic_venv: str = "",
     n_designs: int = 500,
     top_k: int = 50,
+    engine: str = "boltz2",
 ) -> Path:
     """Phase 3: Production Mosaic Run.
 
@@ -263,6 +269,7 @@ def run_pipeline(
     production_top_k: int = 50,
     mosaic_venv: str = "",
     phase: str = "all",
+    engine: str = "boltz2",
 ) -> dict:
     """Run the full pipeline or a specific phase.
 
@@ -316,10 +323,14 @@ def run_pipeline(
             max_experiments=tune_experiments,
             mosaic_venv=mosaic_venv,
             n_designs_per_experiment=tune_designs,
+            engine=engine,
         )
     else:
         # No tuning — use template with defaults
-        template = Path(__file__).parent / "design_template.py"
+        if engine == "proteina":
+            template = Path(__file__).parent / "design_template_proteina.py"
+        else:
+            template = Path(__file__).parent / "design_template.py"
         design_py = output_dir / "design.py"
         content = template.read_text()
         target_seq = analysis.get("sequence", "")
@@ -349,6 +360,7 @@ def run_pipeline(
         mosaic_venv=mosaic_venv,
         n_designs=production_designs,
         top_k=production_top_k,
+        engine=engine,
     )
     summary["production_dir"] = str(production_dir)
 
@@ -406,6 +418,10 @@ def main():
                         default=str(Path.home() / "BindMaster" / "Mosaic" / ".venv"),
                         help="Path to Mosaic UV venv")
 
+    # Engine selection
+    parser.add_argument("--engine", choices=["boltz2", "proteina"],
+                        default="boltz2", help="Design engine")
+
     # Phase selection
     parser.add_argument("--phase", choices=["analyze", "tune", "produce", "all"],
                         default="all", help="Run specific phase only")
@@ -425,6 +441,7 @@ def main():
         production_top_k=args.top_k,
         mosaic_venv=args.mosaic_venv,
         phase=args.phase,
+        engine=args.engine,
     )
 
 
