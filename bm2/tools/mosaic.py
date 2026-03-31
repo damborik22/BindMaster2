@@ -22,6 +22,10 @@ _HALLUCINATE_SEARCH_PATHS = [
     "examples/bindmaster_examples/hallucinate_bindmaster.py",
 ]
 
+_PROTEINA_SEARCH_PATHS = [
+    "examples/bindmaster_examples/hallucinate_proteina.py",
+]
+
 
 class MosaicLauncher(ToolLauncher):
     """Launch Mosaic binder design in its UV venv."""
@@ -51,6 +55,14 @@ class MosaicLauncher(ToolLauncher):
     def _find_hallucinate_template(self) -> Path | None:
         """Find hallucinate_bindmaster.py in known locations."""
         for rel_path in _HALLUCINATE_SEARCH_PATHS:
+            candidate = self._install_dir / rel_path
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _find_proteina_template(self) -> Path | None:
+        """Find hallucinate_proteina.py in known locations."""
+        for rel_path in _PROTEINA_SEARCH_PATHS:
             candidate = self._install_dir / rel_path
             if candidate.exists():
                 return candidate
@@ -107,13 +119,19 @@ class MosaicLauncher(ToolLauncher):
         if custom_script:
             return {"script": Path(custom_script)}
 
-        # Option 2: Template hallucinate_bindmaster.py
-        template = self._find_hallucinate_template()
+        # Option 2: Template hallucinate script (boltz2 or proteina engine)
+        engine = run_config.extra_settings.get("engine", "boltz2")
+        if engine == "proteina":
+            template = self._find_proteina_template()
+            template_name = "hallucinate_proteina.py"
+        else:
+            template = self._find_hallucinate_template()
+            template_name = "hallucinate_bindmaster.py"
         if template is None:
             raise ValueError(
-                "Mosaic hallucination template not found. "
+                f"Mosaic hallucination template not found. "
                 f"Expected at: {self._install_dir}/examples/bindmaster_examples/"
-                "hallucinate_bindmaster.py\n"
+                f"{template_name}\n"
                 "Alternatively, provide a script path via extra_settings['script']."
             )
 

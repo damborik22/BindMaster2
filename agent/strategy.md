@@ -116,6 +116,48 @@ Three-stage simplex_APGM optimization with escalating sharpness:
 - Multiple epitope engagement (avidity) may have contributed with the tetrameric target
 - **Takeaway: trust the model. Large binders can be better. Don't over-filter.**
 
+## Proteina-Complexa Beam Search
+
+### When to Use
+
+- **Fast exploration:** ~1-3 seconds per design vs ~2 minutes for Boltz-2
+- **Length/loss screening:** Quickly test which binder lengths and loss compositions work
+- **Backbone diversity:** Flow matching generates structurally diverse solutions
+- **After Boltz-2 tuning:** Use Proteina to rapidly validate if the same loss weights work with a different generation method
+
+### Beam Search Parameters
+
+| Parameter | Default | Range | Effect |
+|-----------|---------|-------|--------|
+| BEAM_WIDTH | 4 | 1-8 | Beams kept after pruning. More = wider search, slower. |
+| N_BRANCH | 4 | 1-8 | Branches per beam per checkpoint. More = more diverse. |
+| STEP_CHECKPOINTS | [0,100,200,300,400] | 2-10 intervals | Finer pruning schedule. More = better but slower. |
+| INVERSE_FOLD_SAMPLES | 5 | 1-20 | Sequence variants per backbone. More = better chance of good sequence. |
+| N_STEPS | 400 | 100-1000 | ODE integration steps. 400 is standard. |
+
+### Loss Function (No MPNN)
+
+Proteina generates sequences end-to-end via its decoder — no ProteinMPNN needed.
+The loss function scores decoded designs for beam selection:
+
+| Term | Default Weight | Purpose |
+|------|---------------|---------|
+| IPTMLoss | 1.0 | Interface confidence (primary) |
+| BinderTargetIPSAE | 0.5 | Binding quality (binder→target) |
+| TargetBinderIPSAE | 0.5 | Binding quality (target→binder) |
+| BinderTargetContact | 0.0 | Contact count (optional) |
+| PLDDTLoss | 0.0 | Per-residue confidence (optional) |
+| WithinBinderPAE | 0.0 | Binder fold confidence (optional) |
+
+### Known Failure Modes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| All designs identical | BEAM_WIDTH too small | Increase to 6-8 |
+| Poor sequences despite good backbone | Decoder variance | Increase INVERSE_FOLD_SAMPLES to 10-20 |
+| OOM on GPU | Long binder + wide beam | Reduce BEAM_WIDTH or binder length |
+| Slow beam search | Too many checkpoints | Use [0, 200, 400] instead of 5 intervals |
+
 ## Lab-Specific Knowledge (Loschmidt Laboratories)
 
 - Expression system: E. coli BL21(DE3), pET21b, 0.1 mM IPTG, 18°C overnight
